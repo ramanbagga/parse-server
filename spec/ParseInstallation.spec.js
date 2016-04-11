@@ -1,3 +1,4 @@
+'use strict';
 // These tests check the Installations functionality of the REST API.
 // Ported from installation_collection_test.go
 
@@ -9,7 +10,7 @@ var Parse = require('parse/node').Parse;
 var rest = require('../src/rest');
 
 var config = new Config('test');
-var database = DatabaseAdapter.getDatabaseConnection('test');
+let database = DatabaseAdapter.getDatabaseConnection('test', 'test_');
 
 describe('Installations', () => {
 
@@ -444,6 +445,52 @@ describe('Installations', () => {
       done();
     });
   });
+
+  it('update android device token with duplicate device token', (done) => {
+    var installId1 = '11111111-abcd-abcd-abcd-123456789abc';
+    var installId2 = '22222222-abcd-abcd-abcd-123456789abc';
+    var t = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+    var input = {
+      'installationId': installId1,
+      'deviceToken': t,
+      'deviceType': 'android'
+    };
+    var firstObject;
+    var secondObject;
+    rest.create(config, auth.nobody(config), '_Installation', input)
+        .then(() => {
+          input = {
+            'installationId': installId2,
+            'deviceType': 'android'
+          };
+          return rest.create(config, auth.nobody(config), '_Installation', input);
+        }).then(() => {
+      return database.mongoFind('_Installation',
+          {installationId: installId1}, {});
+    }).then((results) => {
+      expect(results.length).toEqual(1);
+      firstObject = results[0];
+      return database.mongoFind('_Installation',
+          {installationId: installId2}, {});
+    }).then((results) => {
+      expect(results.length).toEqual(1);
+      secondObject = results[0];
+      // Update second installation to conflict with first installation
+      input = {
+        'objectId': secondObject._id,
+        'deviceToken': t
+      };
+      return rest.update(config, auth.nobody(config), '_Installation',
+          secondObject._id, input);
+    }).then(() => {
+      // The first object should have been deleted
+      return database.mongoFind('_Installation', {_id: firstObject._id}, {});
+    }).then((results) => {
+      expect(results.length).toEqual(0);
+      done();
+    }).catch((error) => { console.log(error); });
+  });
+
 
   it('update ios device token with duplicate device token', (done) => {
     var installId1 = '11111111-abcd-abcd-abcd-123456789abc';

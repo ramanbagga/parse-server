@@ -1,14 +1,15 @@
 // These methods handle the User-related routes.
 
-import deepcopy from 'deepcopy';
+import deepcopy       from 'deepcopy';
 
-import ClassesRouter from './ClassesRouter';
-import PromiseRouter from '../PromiseRouter';
-import rest from '../rest';
-import Auth from '../Auth';
+import ClassesRouter  from './ClassesRouter';
+import PromiseRouter  from '../PromiseRouter';
+import rest           from '../rest';
+import Auth           from '../Auth';
 import passwordCrypto from '../password';
-import RestWrite from '../RestWrite';
-import { newToken } from '../cryptoUtils';
+import RestWrite      from '../RestWrite';
+let cryptoUtils = require('../cryptoUtils');
+let triggers = require('../triggers');
 
 export class UsersRouter extends ClassesRouter {
   handleFind(req) {
@@ -25,6 +26,7 @@ export class UsersRouter extends ClassesRouter {
     let data = deepcopy(req.body);
     req.body = data;
     req.params.className = '_User';
+
     return super.handleCreate(req);
   }
 
@@ -42,8 +44,9 @@ export class UsersRouter extends ClassesRouter {
     if (!req.info || !req.info.sessionToken) {
       throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'invalid session token');
     }
+    let sessionToken = req.info.sessionToken;
     return rest.find(req.config, Auth.master(req.config), '_Session',
-      { _session_token: req.info.sessionToken },
+      { _session_token: sessionToken },
       { include: 'user' })
       .then((response) => {
         if (!response.results ||
@@ -52,6 +55,8 @@ export class UsersRouter extends ClassesRouter {
           throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'invalid session token');
         } else {
           let user = response.results[0].user;
+          // Send token back on the login, because SDKs expect that.
+          user.sessionToken = sessionToken;
           return { response: user };
         }
       });
@@ -72,7 +77,7 @@ export class UsersRouter extends ClassesRouter {
     }
 
     let user;
-    return req.database.find('_User', { username: req.body.username })
+    return req.config.database.find('_User', { username: req.body.username })
       .then((results) => {
         if (!results.length) {
           throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Invalid username/password.');
@@ -84,9 +89,22 @@ export class UsersRouter extends ClassesRouter {
           throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'Invalid username/password.');
         }
 
-        let token = 'r:' + newToken();
+        let token = 'r:' + cryptoUtils.newToken();
         user.sessionToken = token;
         delete user.password;
+
+        // Sometimes the authData still has null on that keys
+        // https://github.com/ParsePlatform/parse-server/issues/935
+        if (user.authData) {
+          Object.keys(user.authData).forEach((provider) => {
+            if (user.authData[provider] === null) {
+              delete user.authData[provider];
+            }
+          });
+          if (Object.keys(user.authData).length == 0) {
+            delete user.authData;
+          }
+        }
 
         req.config.filesController.expandFilesInObject(req.config, user);
 
@@ -138,6 +156,23 @@ export class UsersRouter extends ClassesRouter {
     return Promise.resolve(success);
   }
 
+  handleResetRequest(req) {
+     let { email } = req.body;
+     if (!email) {
+       throw new Parse.Error(Parse.Error.EMAIL_MISSING, "you must provide an email");
+     }
+     let userController = req.config.userController;
+
+     return userController.sendPasswordResetEmail(email).then((token) => {
+        return Promise.resolve({
+          response: {}
+        });
+     }, (err) => {
+       throw new Parse.Error(Parse.Error.EMAIL_NOT_FOUND, `no user found with email ${email}`);
+     });
+  }
+
+
   mountRoutes() {
     this.route('GET', '/users', req => { return this.handleFind(req); });
     this.route('POST', '/users', req => { return this.handleCreate(req); });
@@ -147,9 +182,7 @@ export class UsersRouter extends ClassesRouter {
     this.route('DELETE', '/users/:objectId', req => { return this.handleDelete(req); });
     this.route('GET', '/login', req => { return this.handleLogIn(req); });
     this.route('POST', '/logout', req => { return this.handleLogOut(req); });
-    this.route('POST', '/requestPasswordReset', () => {
-      throw new Parse.Error(Parse.Error.COMMAND_UNAVAILABLE, 'This path is not implemented yet.');
-    });
+    this.route('POST', '/requestPasswordReset', req => { return this.handleResetRequest(req); })
   }
 }
 

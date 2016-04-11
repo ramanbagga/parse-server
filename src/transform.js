@@ -1,3 +1,4 @@
+import log from './logger';
 var mongodb = require('mongodb');
 var Parse = require('parse/node').Parse;
 
@@ -41,6 +42,12 @@ export function transformKeyValue(schema, className, restKey, restValue, options
   case '_updated_at':
     key = '_updated_at';
     timeField = true;
+    break;
+  case '_email_verify_token':
+    key = "_email_verify_token";
+    break;
+  case '_perishable_token':
+    key = "_perishable_token";
     break;
   case 'sessionToken':
   case '_session_token':
@@ -180,13 +187,12 @@ export function transformKeyValue(schema, className, restKey, restValue, options
 // Returns the mongo form of the query.
 // Throws a Parse.Error if the input query is invalid.
 function transformWhere(schema, className, restWhere) {
-  var mongoWhere = {};
+  let mongoWhere = {};
   if (restWhere['ACL']) {
-    throw new Parse.Error(Parse.Error.INVALID_QUERY,
-                          'Cannot query on ACL.');
+    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'Cannot query on ACL.');
   }
-  for (var restKey in restWhere) {
-    var out = transformKeyValue(schema, className, restKey, restWhere[restKey],
+  for (let restKey in restWhere) {
+    let out = transformKeyValue(schema, className, restKey, restWhere[restKey],
                                 {query: true, validate: true});
     mongoWhere[out.key] = out.value;
   }
@@ -197,6 +203,9 @@ function transformWhere(schema, className, restWhere) {
 // restCreate is the "create" clause in REST API form.
 // Returns the mongo form of the object.
 function transformCreate(schema, className, restCreate) {
+  if (className == '_User') {
+     restCreate = transformAuthData(restCreate);
+  }
   var mongoCreate = transformACL(restCreate);
   for (var restKey in restCreate) {
     var out = transformKeyValue(schema, className, restKey, restCreate[restKey]);
@@ -212,6 +221,10 @@ function transformUpdate(schema, className, restUpdate) {
   if (!restUpdate) {
     throw 'got empty restUpdate';
   }
+  if (className == '_User') {
+    restUpdate = transformAuthData(restUpdate);
+  }
+
   var mongoUpdate = {};
   var acl = transformACL(restUpdate);
   if (acl._rperm || acl._wperm) {
@@ -242,6 +255,23 @@ function transformUpdate(schema, className, restUpdate) {
   }
 
   return mongoUpdate;
+}
+
+function transformAuthData(restObject) {
+  if (restObject.authData) {
+    Object.keys(restObject.authData).forEach((provider) => {
+      let providerData = restObject.authData[provider];
+      if (providerData == null) {
+        restObject[`_auth_data_${provider}`] = {
+          __op: 'Delete'
+        }
+      } else {
+        restObject[`_auth_data_${provider}`] = providerData;
+      }
+    });
+    delete restObject.authData;
+  }
+  return restObject;
 }
 
 // Transforms a REST API formatted ACL object to our two-field mongo format.
@@ -368,6 +398,9 @@ function transformAtom(atom, force, options) {
     if (FileCoder.isValidJSON(atom)) {
       return (inArray || inObject ? atom : FileCoder.JSONToDatabase(atom));
     }
+    if (inArray || inObject) {
+      return atom;
+    }
 
     if (force) {
       throw new Parse.Error(Parse.Error.INVALID_JSON,
@@ -406,6 +439,7 @@ function transformConstraint(constraint, inArray) {
     case '$gte':
     case '$exists':
     case '$ne':
+    case '$eq':
       answer[key] = transformAtom(constraint[key], true,
                                   {inArray: inArray});
       break;
@@ -418,7 +452,7 @@ function transformConstraint(constraint, inArray) {
                               'bad ' + key + ' value');
       }
       answer[key] = arr.map((v) => {
-        return transformAtom(v, true);
+        return transformAtom(v, true, { inArray: inArray });
       });
       break;
 
@@ -638,7 +672,7 @@ function untransformObject(schema, className, mongoObject, isNestedObject = fals
         break;
       case 'expiresAt':
       case '_expiresAt':
-        restObject['expiresAt'] = Parse._encode(new Date(mongoObject[key])).iso;
+        restObject['expiresAt'] = Parse._encode(new Date(mongoObject[key]));
         break;
       default:
         // Check other auth data keys
@@ -649,7 +683,7 @@ function untransformObject(schema, className, mongoObject, isNestedObject = fals
           restObject['authData'][provider] = mongoObject[key];
           break;
         }
-        
+
         if (key.indexOf('_p_') == 0) {
           var newKey = key.substring(3);
           var expected;
@@ -657,13 +691,13 @@ function untransformObject(schema, className, mongoObject, isNestedObject = fals
             expected = schema.getExpectedType(className, newKey);
           }
           if (!expected) {
-            console.log(
+            log.info('transform.js',
               'Found a pointer column not in the schema, dropping it.',
               className, newKey);
             break;
           }
           if (expected && expected[0] != '*') {
-            console.log('Found a pointer in a non-pointer column, dropping it.', className, key);
+            log.info('transform.js', 'Found a pointer in a non-pointer column, dropping it.', className, key);
             break;
           }
           if (mongoObject[key] === null) {
@@ -799,4 +833,3 @@ module.exports = {
   transformWhere: transformWhere,
   untransformObject: untransformObject
 };
-

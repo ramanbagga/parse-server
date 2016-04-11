@@ -1,3 +1,4 @@
+/** @flow weak */
 // Database Adapter
 //
 // Allows you to change the underlying database.
@@ -12,15 +13,18 @@
 // * destroy(className, query, options)
 // * This list is incomplete and the database process is not fully modularized.
 //
-// Default is ExportAdapter, which uses mongo.
+// Default is MongoStorageAdapter.
 
-var ExportAdapter = require('./ExportAdapter');
+import DatabaseController from './Controllers/DatabaseController';
+import MongoStorageAdapter from './Adapters/Storage/Mongo/MongoStorageAdapter';
 
-var adapter = ExportAdapter;
-var cache = require('./cache');
-var dbConnections = {};
-var databaseURI = 'mongodb://localhost:27017/parse';
-var appDatabaseURIs = {};
+const DefaultDatabaseURI = 'mongodb://localhost:27017/parse';
+
+let adapter = MongoStorageAdapter;
+let dbConnections = {};
+let databaseURI = DefaultDatabaseURI;
+let appDatabaseURIs = {};
+let appDatabaseOptions = {};
 
 function setAdapter(databaseAdapter) {
   adapter = databaseAdapter;
@@ -34,22 +38,28 @@ function setAppDatabaseURI(appId, uri) {
   appDatabaseURIs[appId] = uri;
 }
 
-//Used by tests
-function clearDatabaseURIs() {
-  appDatabaseURIs = {};
-  dbConnections = {};
+function setAppDatabaseOptions(appId: string, options: Object) {
+  appDatabaseOptions[appId] = options;
 }
 
-function getDatabaseConnection(appId) {
+//Used by tests
+function clearDatabaseSettings() {
+  appDatabaseURIs = {};
+  dbConnections = {};
+  appDatabaseOptions = {};
+}
+
+function getDatabaseConnection(appId: string, collectionPrefix: string) {
   if (dbConnections[appId]) {
     return dbConnections[appId];
   }
 
   var dbURI = (appDatabaseURIs[appId] ? appDatabaseURIs[appId] : databaseURI);
-  dbConnections[appId] = new adapter(dbURI, {
-    collectionPrefix: cache.apps[appId]['collectionPrefix']
+
+  let storageAdapter = new adapter(dbURI, appDatabaseOptions[appId]);
+  dbConnections[appId] = new DatabaseController(storageAdapter, {
+    collectionPrefix: collectionPrefix
   });
-  dbConnections[appId].connect();
   return dbConnections[appId];
 }
 
@@ -58,6 +68,8 @@ module.exports = {
   getDatabaseConnection: getDatabaseConnection,
   setAdapter: setAdapter,
   setDatabaseURI: setDatabaseURI,
+  setAppDatabaseOptions: setAppDatabaseOptions,
   setAppDatabaseURI: setAppDatabaseURI,
-  clearDatabaseURIs: clearDatabaseURIs,
+  clearDatabaseSettings: clearDatabaseSettings,
+  defaultDatabaseURI: databaseURI
 };

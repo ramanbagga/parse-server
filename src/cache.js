@@ -1,45 +1,35 @@
-var apps = {};
-var stats = {};
-var isLoaded = false;
-var users = {};
+/** @flow weak */
 
-function getApp(app, callback) {
-  if (apps[app]) return callback(true, apps[app]);
-  return callback(false);
+export function CacheStore<KeyType, ValueType>() {
+  let dataStore: {[id:KeyType]:ValueType} = {};
+  return {
+    get: (key: KeyType): ValueType => {
+      return dataStore[key];
+    },
+    set(key: KeyType, value: ValueType): void {
+      dataStore[key] = value;
+    },
+    remove(key: KeyType): void {
+      delete dataStore[key];
+    },
+    clear(): void {
+      dataStore = {};
+    }
+  };
 }
 
-function updateStat(key, value) {
-  stats[key] = value;
-}
-
-function getUser(sessionToken) {
-  if (users[sessionToken]) return users[sessionToken];
-  return undefined;
-}
-
-function setUser(sessionToken, userObject) {
-  users[sessionToken] = userObject;
-}
-
-function clearUser(sessionToken) {
-  delete users[sessionToken];
-}
+const apps = CacheStore();
+const users = CacheStore();
 
 //So far used only in tests
-function clearCache() {
-  apps = {};
-  stats = {};
-  users = {};
+export function clearCache(): void {
+  apps.clear();
+  users.clear();
 }
 
-module.exports = {
-  apps: apps,
-  stats: stats,
-  isLoaded: isLoaded,
-  getApp: getApp,
-  updateStat: updateStat,
-  clearUser: clearUser,
-  getUser: getUser,
-  setUser: setUser,
-  clearCache: clearCache,
+export default {
+  apps,
+  users,
+  clearCache,
+  CacheStore
 };

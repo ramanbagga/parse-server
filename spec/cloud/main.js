@@ -1,5 +1,3 @@
-var Parse = require('parse/node').Parse;
-
 Parse.Cloud.define('hello', function(req, res) {
   res.success('Hello world!');
 });
@@ -102,3 +100,18 @@ Parse.Cloud.define('requiredParameterCheck', function(req, res) {
 }, function(params) {
   return params.name;
 });
+
+Parse.Cloud.define('echoKeys', function(req, res){
+  return res.success({
+    applicationId: Parse.applicationId,
+    masterKey: Parse.masterKey,
+    javascriptKey: Parse.javascriptKey
+  })
+});
+
+Parse.Cloud.define('createBeforeSaveChangedObject', function(req, res){
+  var obj = new Parse.Object('BeforeSaveChanged');
+  obj.save().then(() => {
+    res.success(obj);
+  })
+})

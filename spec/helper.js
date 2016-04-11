@@ -2,12 +2,12 @@
 
 jasmine.DEFAULT_TIMEOUT_INTERVAL = 2000;
 
-var cache = require('../src/cache');
+var cache = require('../src/cache').default;
 var DatabaseAdapter = require('../src/DatabaseAdapter');
 var express = require('express');
-var facebook = require('../src/oauth/facebook');
+var facebook = require('../src/authDataManager/facebook');
 var ParseServer = require('../src/index').ParseServer;
-var DatabaseAdapter = require('../src/DatabaseAdapter');
+var path = require('path');
 
 var databaseURI = process.env.DATABASE_URI;
 var cloudMain = process.env.CLOUD_CODE_MAIN || '../spec/cloud/main.js';
@@ -27,7 +27,7 @@ var defaultConfiguration = {
   collectionPrefix: 'test_',
   fileKey: 'test',
   push: {
-    'ios': {      
+    'ios': {
       cert: 'prodCert.pem',
       key: 'prodKey.pem',
       production: true,
@@ -37,7 +37,7 @@ var defaultConfiguration = {
   oauth: { // Override the facebook provider
     facebook: mockFacebook(),
     myoauth: {
-      module: "../spec/myoauth" // relative path as it's run from src
+      module: path.resolve(__dirname, "myoauth") // relative path as it's run from src
     }
   }
 };
@@ -51,15 +51,22 @@ var server = app.listen(port);
 // Prevent reinitializing the server from clobbering Cloud Code
 delete defaultConfiguration.cloud;
 
+var currentConfiguration;
 // Allows testing specific configurations of Parse Server
 var setServerConfiguration = configuration => {
-  api = new ParseServer(configuration);
-  app = express();
-  app.use('/1', api);
-  cache.clearCache();
+  // the configuration hasn't changed
+  if (configuration === currentConfiguration) {
+    return;
+  }
+  DatabaseAdapter.clearDatabaseSettings();
+  currentConfiguration = configuration;
   server.close();
+  cache.clearCache();
+  app = express();
+  api = new ParseServer(configuration);
+  app.use('/1', api);
   server = app.listen(port);
-}
+};
 
 var restoreServerConfiguration = () => setServerConfiguration(defaultConfiguration);
 
@@ -72,17 +79,17 @@ Parse.serverURL = 'http://localhost:' + port + '/1';
 Parse.Promise.disableAPlusCompliant();
 
 beforeEach(function(done) {
+  restoreServerConfiguration();
   Parse.initialize('test', 'test', 'test');
+  Parse.serverURL = 'http://localhost:' + port + '/1';
   Parse.User.enableUnsafeCurrentUser();
   done();
 });
 
 afterEach(function(done) {
-  restoreServerConfiguration();
   Parse.User.logOut().then(() => {
     return clearData();
   }).then(() => {
-    DatabaseAdapter.clearDatabaseURIs();
     done();
   }, (error) => {
     console.log('error in clearData', error);
@@ -251,3 +258,23 @@ global.arrayContains = arrayContains;
 global.jequal = jequal;
 global.range = range;
 global.setServerConfiguration = setServerConfiguration;
+global.defaultConfiguration = defaultConfiguration;
+
+// LiveQuery test setting
+require('../src/LiveQuery/PLog').logLevel = 'NONE';
+var libraryCache = {};
+jasmine.mockLibrary = function(library, name, mock) {
+  var original = require(library)[name];
+  if (!libraryCache[library]) {
+    libraryCache[library] = {};
+  }
+  require(library)[name] = mock;
+  libraryCache[library][name] = original;
+}
+
+jasmine.restoreLibrary = function(library, name) {
+  if (!libraryCache[library] || !libraryCache[library][name]) {
+    throw 'Can not find library ' + library + ' ' + name;
+  }
+  require(library)[name] = libraryCache[library][name];
+}
